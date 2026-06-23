@@ -288,6 +288,104 @@ function processarSaqueEdbanking($valor, $chavepix, $id, $tipoChavePix)
     return ["status" => "error", "message" => normalizarMensagemErro("Erro ao preparar a query para buscar credenciais do Edbanking")];
 }
 
+function processarSaqueGeraPix($valor, $chavepix, $id, $tipoChavePix)
+{
+    global $mysqli, $url_base;
+
+    $sql_cred = "SELECT url, secret FROM gerapix WHERE id = 1";
+    $stmt_cred = $mysqli->prepare($sql_cred);
+    $stmt_cred->execute();
+    $stmt_cred->bind_result($url_base_gerapix, $secret);
+    $stmt_cred->fetch();
+    $stmt_cred->close();
+
+    if (empty($secret)) {
+        return ["status" => "error", "message" => "Credenciais GeraPix não configuradas."];
+    }
+
+    $url_pixout = rtrim($url_base_gerapix, '/') . '/pix/payments/';
+
+    $doc_tipo   = 'cpf';
+    $doc_numero = preg_replace('/\D/', '', $chavepix['pix_id'] ?? '');
+
+    if (empty($doc_numero) && $tipoChavePix === 'CPF') {
+        $doc_numero = preg_replace('/\D/', '', $chavepix['pix_account']);
+    }
+
+    if (empty($doc_numero)) {
+        return ["status" => "error", "message" => "CPF do destinatário não encontrado para GeraPix."];
+    }
+
+    $nome_destinatario = !empty($chavepix['realname']) ? substr(trim($chavepix['realname']), 0, 100) : 'Destinatario Pix';
+    if (strpos(trim($nome_destinatario), ' ') === false) {
+        $nome_destinatario = $nome_destinatario . ' Titular';
+    }
+
+    $data = [
+        "valor"              => number_format((float)$valor, 2, '.', ''),
+        "nome"               => $nome_destinatario,
+        "doc_tipo"           => $doc_tipo,
+        "doc_numero"         => $doc_numero,
+        "callback_url"       => $url_base . 'gateway/gerapix',
+        "external_reference" => 'SAQUE-' . $id,
+    ];
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $url_pixout);
+    curl_setopt($ch, CURLOPT_POST, 1);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Content-Type: application/json',
+        'Authorization: Bearer ' . $secret,
+    ]);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    $response   = curl_exec($ch);
+    $curl_error = curl_error($ch);
+    $http_code  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    log_withdraw_debug('gerapix_pixout_response', [
+        'transacao_id' => $id,
+        'payload'      => $data,
+        'response_raw' => $response,
+        'http_code'    => $http_code,
+        'curl_error'   => $curl_error,
+    ]);
+
+    $responsejson = json_decode($response, true);
+
+    if ($http_code === 201 && isset($responsejson['id_transacao'])) {
+        $idTransaction = $responsejson['id_transacao'];
+        $sql_update = "UPDATE solicitacao_saques SET status = 1, telefone = ? WHERE transacao_id = ?";
+        $stmt_update = $mysqli->prepare($sql_update);
+        if ($stmt_update) {
+            $stmt_update->bind_param("ss", $idTransaction, $id);
+            $stmt_update->execute();
+            if ($stmt_update->affected_rows > 0) {
+                return ["success" => true, "message" => "Saque com GeraPix aprovado com sucesso."];
+            } else {
+                return ["status" => "error", "message" => normalizarMensagemErro("Nenhuma alteração no banco para GeraPix.")];
+            }
+        } else {
+            return ["status" => "error", "message" => normalizarMensagemErro("Erro ao preparar query de atualização para GeraPix: " . $mysqli->error)];
+        }
+    }
+
+    $errorMessage = null;
+    if (isset($responsejson['message'])) {
+        $errorMessage = $responsejson['message'];
+    } elseif (isset($responsejson['error'])) {
+        $errorMessage = is_array($responsejson['error']) && isset($responsejson['error']['message'])
+            ? $responsejson['error']['message']
+            : $responsejson['error'];
+    } elseif (isset($responsejson['errors'])) {
+        $first = is_array($responsejson['errors']) ? reset($responsejson['errors']) : $responsejson['errors'];
+        $errorMessage = is_array($first) && isset($first['message']) ? $first['message'] : (string)$first;
+    }
+    return ["status" => "error", "message" => normalizarMensagemErro($errorMessage ?? 'Erro desconhecido no GeraPix')];
+}
+
 if (isset($_GET['id'])) {
     $id = PHP_SEGURO($_GET['id']);
     $sql = "SELECT valor, pix FROM solicitacao_saques WHERE transacao_id = ?";
@@ -310,8 +408,9 @@ if (isset($_GET['id'])) {
             }
 
             $mapeamento_saque = [
-                'akadpay' => 'processarSaqueAkadPay',
+                'akadpay'  => 'processarSaqueAkadPay',
                 'edbanking' => 'processarSaqueEdbanking',
+                'gerapix'  => 'processarSaqueGeraPix',
             ];
 
             $gatewayAtivo = false;

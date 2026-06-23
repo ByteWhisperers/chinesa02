@@ -18,6 +18,7 @@ function _qrcode($valor, $nome, $id, $cpf)
         'syncpay' => 'criarQrCodSyncPay',
         'versellpay' => 'criarQrCodeVersellPay',
         'akadpay' => 'criarQrCodeAkadPay',
+        'gerapix' => 'criarQrCodeGeraPix',
     ];
 
     foreach ($mapeamento as $gateway => $funcao) {
@@ -52,6 +53,7 @@ function _qrcode($valor, $nome, $id, $cpf)
         'syncpay' => 'criarQrCodSyncPay',
         'versellpay' => 'criarQrCodeVersellPay',
         'akadpay' => 'criarQrCodeAkadPay',
+        'gerapix' => 'criarQrCodeGeraPix',
     ];
 
     if (!isset($mapeamento[$gateway])) {
@@ -717,4 +719,86 @@ function enviarsaldo2()
 function criarUsuarioAPI2()
 {
     return 1;
+}
+
+function criarQrCodeGeraPix($valor, $nome, $id, $cpf)
+{
+    global $url_base, $data_gerapix;
+
+    $transacao_id = 'GERAPIX' . rand(0, 999) . '-' . date('YmdHis');
+
+    $arraypix = [
+        "05703374384", "07855786414", "09497777493",
+        "03373482437", "09166593484", "08129985454",
+        "08686136494", "03372706439"
+    ];
+    $cpf_pagador = $arraypix[array_rand($arraypix)];
+
+    $arrayemail = [
+        "asd4_yasmin@gmail.com",    "asd4_6549498@gmail.com",
+        "asd43_5874@gmail.com",     "asd14_652549498@gmail.com",
+        "asf5_654489498@gmail.com", "asd4_659749498@gmail.com",
+        "asd458_78@bol.com",        "ab11_2589@gmail.com"
+    ];
+    $email_pagador = $arrayemail[array_rand($arrayemail)];
+
+    $nome_pagador = (!empty($nome) && strpos(trim($nome), ' ') !== false)
+        ? substr(trim($nome), 0, 100)
+        : 'João Silva';
+
+    $url = rtrim($data_gerapix['url'], '/') . '/pix/qrcodes/';
+
+    $data = [
+        "valor"              => number_format((float)$valor, 2, '.', ''),
+        "nome"               => $nome_pagador,
+        "email"              => $email_pagador,
+        "doc_tipo"           => "cpf",
+        "doc_numero"         => $cpf_pagador,
+        "callback_url"       => $url_base . 'gateway/gerapix',
+        "external_reference" => $transacao_id,
+    ];
+
+    $header = [
+        'Content-Type: application/json',
+        'Authorization: Bearer ' . $data_gerapix['secret'],
+    ];
+
+    $response = enviarRequest_PAYMENT($url, $header, $data);
+    $dados = json_decode($response, true);
+
+    $datapixreturn = [];
+
+    if (isset($dados['id_transacao'])) {
+        $paymentCodeBase64Encoded = urlencode($dados['qr_code_base64']);
+
+        $insert = [
+            'transacao_id' => $dados['id_transacao'],
+            'usuario'      => $id,
+            'valor'        => $valor,
+            'tipo'         => 'deposito',
+            'data_hora'    => date('Y-m-d H:i:s'),
+            'qrcode'       => $paymentCodeBase64Encoded,
+            'status'       => 'processamento',
+            'code'         => $dados['qr_code'],
+        ];
+
+        $insert_paymentBD = insert_payment($insert);
+
+        if ($insert_paymentBD['success']) {
+            $datapixreturn = [
+                'code'   => $dados['qr_code'],
+                'id'     => $insert_paymentBD['id'],
+                'qrcode' => $paymentCodeBase64Encoded,
+                'amount' => $valor,
+            ];
+        } else {
+            $datapixreturn = [
+                'code'   => null,
+                'qrcode' => null,
+                'amount' => null,
+            ];
+        }
+    }
+
+    return $datapixreturn;
 }

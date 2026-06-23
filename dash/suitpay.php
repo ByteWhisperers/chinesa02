@@ -66,6 +66,28 @@ function update_akadpay_config($data, $is_active)
     return $stmt->execute();
 }
 
+function get_gerapix_config()
+{
+    global $mysqli;
+    $result = $mysqli->query("SELECT * FROM gerapix WHERE id=1");
+    return $result ? $result->fetch_assoc() : null;
+}
+
+function update_gerapix_config($data, $is_active)
+{
+    global $mysqli;
+    if ($is_active) {
+        $mysqli->query("UPDATE akadpay SET ativo = 0 WHERE id = 1");
+        $mysqli->query("UPDATE edbanking SET ativo = 0 WHERE id = 1");
+        $mysqli->query("UPDATE syncpay SET ativo = 0 WHERE id = 1");
+        $mysqli->query("UPDATE versellpay SET ativo = 0 WHERE id = 1");
+    }
+    $ativo = $is_active ? 1 : 0;
+    $stmt  = $mysqli->prepare("UPDATE gerapix SET token = ?, secret = ?, url = ?, ativo = ? WHERE id = 1");
+    $stmt->bind_param("sssi", $data['token'], $data['secret'], $data['url'], $ativo);
+    return $stmt->execute();
+}
+
 $toastType = null;
 $toastMessage = '';
 
@@ -100,12 +122,26 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         } else {
             $toastMessage = 'Erro ao atualizar as Credenciais AkadPay.';
         }
+    } elseif ($gateway_name == 'gerapix') {
+        $data = [
+            'token'  => $_POST['gerapix_token']  ?? '',
+            'secret' => $_POST['gerapix_secret'] ?? '',
+            'url'    => $_POST['gerapix_url']    ?? 'https://api.gerapix.digital/v1/',
+        ];
+        $is_active = isset($_POST['gerapix_ativo']);
+        if (update_gerapix_config($data, $is_active)) {
+            $toastType    = 'success';
+            $toastMessage = 'Credenciais GeraPix atualizadas com sucesso!';
+        } else {
+            $toastMessage = 'Erro ao atualizar as Credenciais GeraPix.';
+        }
     }
 }
 
 # Buscar os dados atuais
 $edbanking_config = get_edbanking_config() ?: ['client_id' => '', 'client_secret' => '', 'url' => '', 'ativo' => 0];
 $akadpay_config = get_akadpay_config() ?: ['token' => '', 'secret' => '', 'url' => '', 'ativo' => 0];
+$gerapix_config = get_gerapix_config() ?: ['token' => '', 'secret' => '', 'url' => 'https://api.gerapix.digital/v1/', 'ativo' => 0];
 ?>
 
 <head>
@@ -225,6 +261,9 @@ $akadpay_config = get_akadpay_config() ?: ['token' => '', 'secret' => '', 'url' 
                                     <li class="nav-item">
                                         <a class="nav-link active" data-bs-toggle="tab" href="#akadpay" role="tab">AkadPay</a>
                                     </li>
+                                    <li class="nav-item">
+                                        <a class="nav-link" data-bs-toggle="tab" href="#gerapix" role="tab">GeraPix</a>
+                                    </li>
                                 </ul>
 
                                 <!-- Tab panes -->
@@ -301,6 +340,46 @@ $akadpay_config = get_akadpay_config() ?: ['token' => '', 'secret' => '', 'url' 
                                                     <div class="form-check form-switch">
                                                         <input class="form-check-input" type="checkbox" name="akadpay_ativo" id="akadpay_ativo" <?= $akadpay_config['ativo'] ? 'checked' : '' ?>>
                                                         <label class="form-check-label" for="akadpay_ativo">Ativar</label>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="text-center">
+                                                <button type="submit" class="btn btn-success">Salvar Configurações</button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                    <div class="tab-pane" id="gerapix" role="tabpanel">
+                                        <form method="POST" action="">
+                                            <input type="hidden" name="gateway_name" value="gerapix">
+                                            <div class="row mt-3">
+                                                <div class="col-md-6">
+                                                    <div class="card mb-4">
+                                                        <div class="card-body">
+                                                            <h5 class="card-title"><i class="iconoir-user"></i> Token Público</h5>
+                                                            <input type="text" name="gerapix_token" class="form-control" value="<?= htmlspecialchars($gerapix_config['token'] ?? '') ?>" placeholder="Token público">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <div class="card mb-4">
+                                                        <div class="card-body">
+                                                            <h5 class="card-title"><i class="iconoir-lock"></i> Token Secreto</h5>
+                                                            <input type="text" name="gerapix_secret" class="form-control" value="<?= htmlspecialchars($gerapix_config['secret'] ?? '') ?>" placeholder="Token secreto">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <div class="card mb-4">
+                                                        <div class="card-body">
+                                                            <h5 class="card-title"><i class="iconoir-community"></i> Endpoint da API</h5>
+                                                            <input type="text" name="gerapix_url" class="form-control" value="<?= htmlspecialchars($gerapix_config['url'] ?? 'https://api.gerapix.digital/v1/') ?>">
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <div class="form-check form-switch">
+                                                        <input class="form-check-input" type="checkbox" name="gerapix_ativo" id="gerapix_ativo" <?= (!empty($gerapix_config['ativo'])) ? 'checked' : '' ?>>
+                                                        <label class="form-check-label" for="gerapix_ativo">Ativar GeraPix</label>
                                                     </div>
                                                 </div>
                                             </div>

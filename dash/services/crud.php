@@ -84,6 +84,17 @@ function data_syncpay()
 	return $data;
 }
 $data_syncpay = data_syncpay();
+
+function data_gerapix()
+{
+	global $mysqli;
+	$qry = "SELECT * FROM gerapix WHERE id=1";
+	$res = mysqli_query($mysqli, $qry);
+	$data = mysqli_fetch_assoc($res);
+	return $data;
+}
+$data_gerapix = data_gerapix();
+
 function enviarSaldo($email, $saldo)
 {
 	global $mysqli;
