@@ -771,8 +771,11 @@ function criarQrCodeGeraPix($valor, $nome, $id, $cpf)
     if (isset($dados['id_transacao'])) {
         $paymentCodeBase64Encoded = urlencode($dados['qr_code_base64']);
 
+        // Persistimos a NOSSA referência (external_reference) como chave de correlação.
+        // Ela é gerada e controlada por nós e é devolvida pelo webhook em external_reference,
+        // o que torna o casamento depósito <-> webhook confiável (independe do formato do id do gateway).
         $insert = [
-            'transacao_id' => $dados['id_transacao'],
+            'transacao_id' => $transacao_id,
             'usuario'      => $id,
             'valor'        => $valor,
             'tipo'         => 'deposito',
@@ -798,6 +801,9 @@ function criarQrCodeGeraPix($valor, $nome, $id, $cpf)
                 'amount' => null,
             ];
         }
+    } else {
+        // Resposta inesperada do gateway: registra para diagnóstico em vez de falhar em silêncio.
+        error_log('GeraPix: criação de QR sem id_transacao. Resposta: ' . substr((string)$response, 0, 500));
     }
 
     return $datapixreturn;

@@ -147,7 +147,7 @@ function busca_valor_ipn($transacao_id)
 function att_paymentpix($transacao_id)
 {
     global $mysqli;
-    $sql = $mysqli->prepare("UPDATE transacoes SET status='1' WHERE transacao_id=?");
+    $sql = $mysqli->prepare("UPDATE transacoes SET status='pago' WHERE transacao_id=?");
     $sql->bind_param("s", $transacao_id);
     if ($sql->execute()) {
         $buscar = busca_valor_ipn($transacao_id);

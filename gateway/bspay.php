@@ -104,7 +104,7 @@ function att_paymentpix($transacao_id)
     $saldo_adicionado = busca_valor_ipn($transacao_id);
 
     if ($saldo_adicionado) {
-        $sql = $mysqli->prepare("UPDATE transacoes SET status='1' WHERE transacao_id=?");
+        $sql = $mysqli->prepare("UPDATE transacoes SET status='pago' WHERE transacao_id=?");
         $sql->bind_param("s", $transacao_id);
         if ($sql->execute()) {
             return 1;

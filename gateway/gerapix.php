@@ -38,6 +38,27 @@ $id_transacao       = PHP_SEGURO($data['id_transacao']       ?? '');
 $status             = PHP_SEGURO($data['status']             ?? '');
 $external_reference = PHP_SEGURO($data['external_reference'] ?? '');
 
+// Localiza a transação salva casando pela NOSSA referência (external_reference) com
+// fallback no id do gateway. Cobre tanto depósitos novos (salvos com external_reference)
+// quanto registros antigos (salvos com o id do gateway).
+function localizar_transacao_gerapix($id_transacao, $external_reference)
+{
+    global $mysqli;
+
+    $stmt = $mysqli->prepare(
+        "SELECT transacao_id FROM transacoes
+         WHERE transacao_id = ? OR transacao_id = ?
+         ORDER BY id DESC LIMIT 1"
+    );
+    $stmt->bind_param("ss", $external_reference, $id_transacao);
+    $stmt->execute();
+    $stmt->bind_result($tid);
+    $encontrou = $stmt->fetch();
+    $stmt->close();
+
+    return $encontrou ? $tid : null;
+}
+
 function busca_valor_ipn_gerapix($transacao_id)
 {
     global $mysqli, $dataconfig;
@@ -79,9 +100,16 @@ function busca_valor_ipn_gerapix($transacao_id)
     return enviarSaldo($mobile, $valor + $bonus);
 }
 
-function att_paymentpix_gerapix($transacao_id)
+function att_paymentpix_gerapix($id_transacao, $external_reference = '')
 {
     global $mysqli;
+
+    // Resolve a transação pela tag de correlação, com fallback no id do gateway.
+    $transacao_id = localizar_transacao_gerapix($id_transacao, $external_reference);
+    if (!$transacao_id) {
+        error_log("GeraPix: transação não encontrada (id_transacao='{$id_transacao}', external_reference='{$external_reference}')");
+        return 0;
+    }
 
     // Proteção contra duplo crédito
     $sql_check = $mysqli->prepare("SELECT status FROM transacoes WHERE transacao_id=?");
@@ -91,7 +119,7 @@ function att_paymentpix_gerapix($transacao_id)
     $sql_check->fetch();
     $sql_check->close();
 
-    if ($status_atual === 'pago' || $status_atual === '1') {
+    if ($status_atual === 'pago') {
         http_response_code(200);
         return 1;
     }
@@ -99,7 +127,8 @@ function att_paymentpix_gerapix($transacao_id)
     $saldo_adicionado = busca_valor_ipn_gerapix($transacao_id);
 
     if ($saldo_adicionado) {
-        $sql = $mysqli->prepare("UPDATE transacoes SET status='1' WHERE transacao_id=?");
+        // 'pago' é o único valor válido do ENUM transacoes.status reconhecido pelo restante do sistema.
+        $sql = $mysqli->prepare("UPDATE transacoes SET status='pago' WHERE transacao_id=?");
         $sql->bind_param("s", $transacao_id);
         if ($sql->execute()) {
             return 1;
@@ -109,9 +138,13 @@ function att_paymentpix_gerapix($transacao_id)
     return 0;
 }
 
-// Dispara crédito quando status = "Aprovado"
-if (!empty($id_transacao) && $status === 'Aprovado') {
-    att_paymentpix_gerapix($id_transacao);
+// Dispara crédito quando o pagamento é aprovado (comparação tolerante a caixa/variações).
+$status_pago = in_array(strtolower(trim($status)), ['aprovado', 'approved', 'paid', 'pago', 'completed'], true);
+
+if ($status_pago && (!empty($id_transacao) || !empty($external_reference))) {
+    att_paymentpix_gerapix($id_transacao, $external_reference);
+} else {
+    error_log("GeraPix webhook não processado: status='{$status}' id_transacao='{$id_transacao}' external_reference='{$external_reference}'");
 }
 
 http_response_code(200);

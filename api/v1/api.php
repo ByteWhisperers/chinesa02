@@ -1060,7 +1060,7 @@ switch ($requestMethod) {
                                 echo json_encode($response);
                                 exit;
                             } else {
-                                // Calculando o total de depósitos
+                                // Total de depósitos pagos do usuário
                                 $qry = "SELECT SUM(valor) as total_depositos FROM transacoes WHERE usuario=? AND tipo='deposito' AND status='pago'";
                                 $stmt = $mysqli->prepare($qry);
                                 $stmt->bind_param("i", $datares['id']);
@@ -1069,11 +1069,23 @@ switch ($requestMethod) {
                                 $row = $resultado->fetch_assoc();
                                 $total_depositos = ($row['total_depositos'] > 0) ? $row['total_depositos'] : 0;
 
-                                // Verificando se o valor do saque é maior que o valor total dos depósitos multiplicado pelo rollover
-                                if ($valor_saque < $total_depositos * $dataconfig['rollover']) {
+                                // Rollover REAL: soma das apostas válidas do usuário no histórico de jogos
+                                $qry_aposta = "SELECT SUM(bet_money) as total_apostado FROM historico_play WHERE id_user=?";
+                                $stmt_aposta = $mysqli->prepare($qry_aposta);
+                                $stmt_aposta->bind_param("i", $datares['id']);
+                                $stmt_aposta->execute();
+                                $res_aposta = $stmt_aposta->get_result();
+                                $row_aposta = $res_aposta->fetch_assoc();
+                                $total_apostado = ($row_aposta['total_apostado'] > 0) ? $row_aposta['total_apostado'] : 0;
+
+                                // Exigência: precisa ter apostado >= (depósitos * rollover) para liberar o saque
+                                $rollover_exigido = $total_depositos * $dataconfig['rollover'];
+
+                                if ($total_apostado < $rollover_exigido) {
+                                    $falta = $rollover_exigido - $total_apostado;
                                     $response = [
                                         "code" => 0,
-                                        "msg" => "O valor do saque não pode ser menor ou igual ao valor total dos depósitos multiplicado pelo rollover.",
+                                        "msg" => "Você ainda não cumpriu o rollover. Aposte mais R$ " . number_format($falta, 2, ',', '.') . " para liberar o saque.",
                                         "time" => time(),
                                     ];
                                     echo json_encode($response);
